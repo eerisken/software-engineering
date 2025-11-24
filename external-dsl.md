@@ -1,6 +1,7 @@
 # **Developing an External DSL using Python**
 
 A guide to building a business-readable rule engine for temporal benefits.  
+
 Domain Specific Languages (DSLs) allow us to decouple complex business logic from our application code. While Python itself is readable, allowing business analysts or non-developers to define rules in a language that looks like English can be a game-changer for systems requiring frequent updates—like dynamic pricing or holiday events.  
 In this article, we will build a simple **External DSL** to apply temporal benefits (discounts) based on customer attributes and dates (e.g., Christmas or VIP status).
 
