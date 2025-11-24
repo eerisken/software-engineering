@@ -7,12 +7,13 @@ In this article, we will build a simple **External DSL** to apply temporal benef
 ## **The Goal**
 
 We want to parse and execute a configuration file that looks like this:  
+
 rule "Christmas Sale":  
-    IF date \== "2024-12-25"  
+    IF date == "2024-12-25"  
     THEN DISCOUNT 50%
 
 rule "VIP December":  
-    IF customer\_type \== "VIP" AND month \== 12  
+    IF customer_type == "VIP" AND month == 12  
     THEN DISCOUNT 20%
 
 ## **The Architecture**
@@ -26,6 +27,7 @@ To build this, we need three distinct components:
 ## **Step 1: The Tokenizer**
 
 We'll use Python's built-in re module. We need to define regex patterns for keywords, operators, strings, and numbers.  
+```Python
 import re  
 from typing import NamedTuple, List, Any
 
@@ -33,216 +35,222 @@ class Token(NamedTuple):
     type: str  
     value: str
 
-def tokenize(code: str) \-\> List\[Token\]:  
-    token\_specification \= \[  
-        ('NUMBER',   r'\\d+(\\.\\d\*)?%?'),  \# Integer or decimal, optional %  
-        ('STRING',   r'"\[^"\]\*"'),        \# Double-quoted string  
-        ('ID',       r'\[A-Za-z\_\]\[A-Za-z0-9\_\]\*'), \# Identifiers  
-        ('OP',       r'\[=\!\<\>\]=?|AND|OR'), \# Operators  
+def tokenize(code: str) -> List[Token]:  
+    token_specification = [  
+        ('NUMBER',   r'd+(.d*)?%?'),  # Integer or decimal, optional %  
+        ('STRING',   r'"[^"]*"'),        # Double-quoted string  
+        ('ID',       r'[A-Za-z_][A-Za-z0-9_]*'), # Identifiers  
+        ('OP',       r'[=!<>]=?|AND|OR'), # Operators  
         ('COLON',    r':'),  
-        ('NEWLINE',  r'\\n'),  
-        ('SKIP',     r'\[ \\t\]+'),         \# Skip over spaces  
-        ('MISMATCH', r'.'),              \# Any other character  
-    \]  
+        ('NEWLINE',  r'n'),  
+        ('SKIP',     r'[ t]+'),         # Skip over spaces  
+        ('MISMATCH', r'.'),              # Any other character  
+    ]  
       
-    tok\_regex \= '|'.join('(?P\<%s\>%s)' % pair for pair in token\_specification)  
-    tokens \= \[\]  
+    tok_regex = '|'.join('(?P<%s>%s)' % pair for pair in token_specification)  
+    tokens = []  
       
-    for mo in re.finditer(tok\_regex, code):  
-        kind \= mo.lastgroup  
-        value \= mo.group()  
-        if kind \== 'NUMBER':  
+    for mo in re.finditer(tok_regex, code):  
+        kind = mo.lastgroup  
+        value = mo.group()  
+        if kind == 'NUMBER':  
             if value.endswith('%'):  
-                value \= float(value.strip('%')) / 100  
+                value = float(value.strip('%')) / 100  
             else:  
-                value \= float(value)  
-        elif kind \== 'STRING':  
-            value \= value.strip('"')  
-        elif kind \== 'SKIP':  
+                value = float(value)  
+        elif kind == 'STRING':  
+            value = value.strip('"')  
+        elif kind == 'SKIP':  
             continue  
-        elif kind \== 'MISMATCH':  
+        elif kind == 'MISMATCH':  
             raise RuntimeError(f'Unexpected value: {value}')  
           
         tokens.append(Token(kind, value))  
     return tokens
+```
 
 ## **Step 2: The Parser**
 
 The parser takes the list of tokens and ensures they follow our grammar. We will build a simple **Abstract Syntax Tree (AST)**.  
-\# AST Nodes  
+```Python
+# AST Nodes  
 class Rule:  
-    def \_\_init\_\_(self, name, condition, action):  
-        self.name \= name  
-        self.condition \= condition  
-        self.action \= action
+    def __init__(self, name, condition, action):  
+        self.name = name  
+        self.condition = condition  
+        self.action = action
 
 class BinaryOp:  
-    def \_\_init\_\_(self, left, op, right):  
-        self.left \= left  
-        self.op \= op  
-        self.right \= right
+    def __init__(self, left, op, right):  
+        self.left = left  
+        self.op = op  
+        self.right = right
 
 class Action:  
-    def \_\_init\_\_(self, type, value):  
-        self.type \= type  
-        self.value \= value
+    def __init__(self, type, value):  
+        self.type = type  
+        self.value = value
 
 class Parser:  
-    def \_\_init\_\_(self, tokens):  
-        self.tokens \= tokens  
-        self.pos \= 0
+    def __init__(self, tokens):  
+        self.tokens = tokens  
+        self.pos = 0
 
-    def consume(self, expected\_type=None):  
-        if self.pos \< len(self.tokens):  
-            token \= self.tokens\[self.pos\]  
-            if expected\_type and token.type \!= expected\_type:  
-                raise SyntaxError(f"Expected {expected\_type}, got {token.type}")  
-            self.pos \+= 1  
+    def consume(self, expected_type=None):  
+        if self.pos < len(self.tokens):  
+            token = self.tokens[self.pos]  
+            if expected_type and token.type != expected_type:  
+                raise SyntaxError(f"Expected {expected_type}, got {token.type}")  
+            self.pos += 1  
             return token  
         return None
 
     def parse(self):  
-        rules \= \[\]  
-        while self.pos \< len(self.tokens):  
-            \# Skip empty lines  
-            while self.pos \< len(self.tokens) and self.tokens\[self.pos\].type \== 'NEWLINE':  
+        rules = []  
+        while self.pos < len(self.tokens):  
+            # Skip empty lines  
+            while self.pos < len(self.tokens) and self.tokens[self.pos].type == 'NEWLINE':  
                 self.consume()  
-            if self.pos \>= len(self.tokens): break  
+            if self.pos >= len(self.tokens): break  
               
-            rules.append(self.parse\_rule())  
+            rules.append(self.parse_rule())  
         return rules
 
-    def parse\_rule(self):  
-        \# Grammar: rule "Name": IF \<condition\> THEN \<action\>  
-        if self.consume('ID').value \!= 'rule': raise SyntaxError("Expected 'rule'")  
-        rule\_name \= self.consume('STRING').value  
+    def parse_rule(self):  
+        # Grammar: rule "Name": IF <condition> THEN <action>  
+        if self.consume('ID').value != 'rule': raise SyntaxError("Expected 'rule'")  
+        rule_name = self.consume('STRING').value  
         self.consume('COLON')  
         self.consume('NEWLINE')  
           
-        if self.consume('ID').value \!= 'IF': raise SyntaxError("Expected 'IF'")  
-        condition \= self.parse\_condition()  
+        if self.consume('ID').value != 'IF': raise SyntaxError("Expected 'IF'")  
+        condition = self.parse_condition()  
         self.consume('NEWLINE')  
           
-        if self.consume('ID').value \!= 'THEN': raise SyntaxError("Expected 'THEN'")  
-        action \= self.parse\_action()  
+        if self.consume('ID').value != 'THEN': raise SyntaxError("Expected 'THEN'")  
+        action = self.parse_action()  
           
-        return Rule(rule\_name, condition, action)
+        return Rule(rule_name, condition, action)
 
-    def parse\_condition(self):  
-        \# Simple Left OP Right parsing  
-        left \= self.consume() \# ID (e.g., customer\_type)  
-        op \= self.consume('OP')  
-        right \= self.consume() \# Value (String/Num) or ID  
+    def parse_condition(self):  
+        # Simple Left OP Right parsing  
+        left = self.consume() # ID (e.g., customer_type)  
+        op = self.consume('OP')  
+        right = self.consume() # Value (String/Num) or ID  
           
-        \# Look ahead for AND/OR  
-        if self.pos \< len(self.tokens) and self.tokens\[self.pos\].value in ('AND', 'OR'):  
-            logic\_op \= self.consume('OP')  
-            next\_condition \= self.parse\_condition()  
-            return BinaryOp(BinaryOp(left, op.value, right), logic\_op.value, next\_condition)  
+        # Look ahead for AND/OR  
+        if self.pos < len(self.tokens) and self.tokens[self.pos].value in ('AND', 'OR'):  
+            logic_op = self.consume('OP')  
+            next_condition = self.parse_condition()  
+            return BinaryOp(BinaryOp(left, op.value, right), logic_op.value, next_condition)  
               
         return BinaryOp(left, op.value, right)
 
-    def parse\_action(self):  
-        \# Grammar: DISCOUNT \<number\>  
-        action\_type \= self.consume('ID').value \# DISCOUNT  
-        value \= self.consume('NUMBER').value  
-        return Action(action\_type, value)
+    def parse_action(self):  
+        # Grammar: DISCOUNT <number>  
+        action_type = self.consume('ID').value # DISCOUNT  
+        value = self.consume('NUMBER').value  
+        return Action(action_type, value)
+```
 
 ## **Step 3: The Interpreter**
 
 The interpreter runs the logic. It takes a **Context** (a dictionary containing the current customer and date data) and applies the AST rules against it.  
 import datetime
-
+```Python
 class Engine:  
-    def \_\_init\_\_(self):  
-        self.rules \= \[\]
+    def __init__(self):  
+        self.rules = []
 
-    def load\_rules(self, dsl\_text):  
-        tokens \= tokenize(dsl\_text)  
-        parser \= Parser(tokens)  
-        self.rules \= parser.parse()
+    def load_rules(self, dsl_text):  
+        tokens = tokenize(dsl_text)  
+        parser = Parser(tokens)  
+        self.rules = parser.parse()
 
-    def evaluate\_condition(self, node, context):  
+    def evaluate_condition(self, node, context):  
         if isinstance(node, BinaryOp):  
-            \# Handle Logical AND/OR  
-            if node.op \== 'AND':  
-                return self.evaluate\_condition(node.left, context) and \\  
-                       self.evaluate\_condition(node.right, context)  
-            if node.op \== 'OR':  
-                return self.evaluate\_condition(node.left, context) or \\  
-                       self.evaluate\_condition(node.right, context)
+            # Handle Logical AND/OR  
+            if node.op == 'AND':  
+                return self.evaluate_condition(node.left, context) and   
+                       self.evaluate_condition(node.right, context)  
+            if node.op == 'OR':  
+                return self.evaluate_condition(node.left, context) or   
+                       self.evaluate_condition(node.right, context)
 
-            \# Handle Comparisons  
-            \# Resolve left side (usually a variable from context)  
-            left\_val \= context.get(node.left.value) if node.left.type \== 'ID' else node.left.value  
-            right\_val \= context.get(node.right.value) if node.right.type \== 'ID' else node.right.value
+            # Handle Comparisons  
+            # Resolve left side (usually a variable from context)  
+            left_val = context.get(node.left.value) if node.left.type == 'ID' else node.left.value  
+            right_val = context.get(node.right.value) if node.right.type == 'ID' else node.right.value
 
-            \# Simple comparison logic  
-            if node.op \== '==': return str(left\_val) \== str(right\_val)  
-            if node.op \== '\>=': return left\_val \>= right\_val  
-            if node.op \== '\<=': return left\_val \<= right\_val  
-            if node.op \== '\>':  return left\_val \> right\_val  
-            if node.op \== '\<':  return left\_val \< right\_val  
+            # Simple comparison logic  
+            if node.op == '==': return str(left_val) == str(right_val)  
+            if node.op == '>=': return left_val >= right_val  
+            if node.op == '<=': return left_val <= right_val  
+            if node.op == '>':  return left_val > right_val  
+            if node.op == '<':  return left_val < right_val  
               
         return False
 
-    def apply\_benefits(self, context):  
-        best\_discount \= 0.0  
-        applied\_rules \= \[\]
+    def apply_benefits(self, context):  
+        best_discount = 0.0  
+        applied_rules = []
 
         for rule in self.rules:  
-            if self.evaluate\_condition(rule.condition, context):  
-                if rule.action.type \== 'DISCOUNT':  
-                    \# We simply take the max discount available in this example  
-                    if rule.action.value \> best\_discount:  
-                        best\_discount \= rule.action.value  
-                        applied\_rules.append(rule.name)  
+            if self.evaluate_condition(rule.condition, context):  
+                if rule.action.type == 'DISCOUNT':  
+                    # We simply take the max discount available in this example  
+                    if rule.action.value > best_discount:  
+                        best_discount = rule.action.value  
+                        applied_rules.append(rule.name)  
           
-        return best\_discount, applied\_rules
+        return best_discount, applied_rules
+```
 
 ## **Putting It All Together**
 
 Let's test our engine with a specific date and customer type.  
-\# 1\. Define the Rules  
-dsl\_script \= """  
+```Python
+# 1. Define the Rules  
+dsl_script = """  
 rule "Christmas Mega Sale":  
-    IF date \== "2024-12-25"  
+    IF date == "2024-12-25"  
     THEN DISCOUNT 50%
 
 rule "VIP Winter Special":  
-    IF customer\_type \== "VIP" AND month \== 12  
+    IF customer_type == "VIP" AND month == 12  
     THEN DISCOUNT 20%  
       
 rule "Standard Member":  
-    IF customer\_type \== "standard"  
+    IF customer_type == "standard"  
     THEN DISCOUNT 5%  
 """
 
-\# 2\. Initialize Engine  
-engine \= Engine()  
-engine.load\_rules(dsl\_script)
+# 2. Initialize Engine  
+engine = Engine()  
+engine.load_rules(dsl_script)
 
-\# 3\. Create Contexts (Simulation)  
-context\_christmas \= {  
+# 3. Create Contexts (Simulation)  
+context_christmas = {  
     "date": "2024-12-25",  
     "month": 12,  
-    "customer\_type": "standard"  
+    "customer_type": "standard"  
 }
 
-context\_vip\_early \= {  
+context_vip_early = {  
     "date": "2024-12-10",  
     "month": 12,  
-    "customer\_type": "VIP"  
+    "customer_type": "VIP"  
 }
 
-\# 4\. Run  
-discount, rules \= engine.apply\_benefits(context\_christmas)  
-print(f"Christmas Context: {discount\*100}% off via {rules}")  
-\# Output: Christmas Context: 50.0% off via \['Standard Member', 'Christmas Mega Sale'\]
+# 4. Run  
+discount, rules = engine.apply_benefits(context_christmas)  
+print(f"Christmas Context: {discount*100}% off via {rules}")  
+# Output: Christmas Context: 50.0% off via ['Standard Member', 'Christmas Mega Sale']
 
-discount, rules \= engine.apply\_benefits(context\_vip\_early)  
-print(f"VIP Context:       {discount\*100}% off via {rules}")  
-\# Output: VIP Context:       20.0% off via \['VIP Winter Special'\]
+discount, rules = engine.apply_benefits(context_vip_early)  
+print(f"VIP Context:       {discount*100}% off via {rules}")  
+# Output: VIP Context:       20.0% off via ['VIP Winter Special']
+```
 
 ## **Conclusion**
 
